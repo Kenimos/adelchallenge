@@ -7,14 +7,22 @@ type DayState = Record<Habit, boolean>;
 type TrackerState = Record<number, DayState>; // 1..75
 
 // ---------- Config / Helpers ----------
-const HABITS: Habit[] = ["diet", "water", "book", "workout", "pic"]; // pořadí sloupců
+const HABITS: Habit[] = ["workout", "water", "diet", "book", "pic"]; // column order
 
 const habitLabel: Record<Habit, string> = {
-    diet: "Diet",
-    water: "Water",
-    book: "Book",
-    workout: "Workout",
-    pic: "Pic",
+    workout: "WORKOUT",
+    water: "WATER",
+    diet: "DIET",
+    book: "BOOK",
+    pic: "PIC",
+};
+
+const ICON: Record<Habit, React.ElementType> = {
+    workout: Dumbbell,
+    water: Droplet,
+    diet: Apple,
+    book: BookOpen,
+    pic: Camera,
 };
 
 const STORAGE_KEY = "75soft-tracker-v1";
@@ -49,29 +57,12 @@ function useLocalStorageState<T>(key: string, initial: T) {
     return [val, setVal] as const;
 }
 
-function formatCZ(dateStr: string) {
+function formatDate(dateStr: string) {
     if (!dateStr) return "—";
     const [y, m, d] = dateStr.split("-").map(Number);
     const dd = String(d).padStart(2, "0");
     const mm = String(m).padStart(2, "0");
     return `${dd}.${mm}.${y}`;
-}
-
-// Ikona pro daný návyk (černá, minimalistická)
-function HabitIcon({ type, className = "w-5 h-5" }: { type: Habit; className?: string }) {
-    const common = `${className} text-black`;
-    switch (type) {
-        case "diet":
-            return <Apple className={common} aria-hidden />;
-        case "water":
-            return <Droplet className={common} aria-hidden />;
-        case "book":
-            return <BookOpen className={common} aria-hidden />;
-        case "workout":
-            return <Dumbbell className={common} aria-hidden />;
-        case "pic":
-            return <Camera className={common} aria-hidden />;
-    }
 }
 
 // ---------- UI ----------
@@ -95,7 +86,7 @@ export default function App() {
     };
 
     const resetAll = () => {
-        if (confirm("Resetovat všechna políčka?")) {
+        if (confirm("Reset all progress?")) {
             setState(makeEmptyState());
             setHiddenDays([]);
         }
@@ -121,24 +112,17 @@ export default function App() {
                     <h1 className="text-4xl font-extrabold tracking-tight lowercase">75 soft</h1>
                     <p className="mt-1 text-sm tracking-[0.25em] uppercase">Challenge Tracker</p>
 
-                    {/* Date picker */}
+                    {/* Date picker — visible input for full mobile support */}
                     <div className="mt-4 flex flex-col items-center gap-2">
-                        <div className="flex h-10 w-32 items-center justify-center rounded-md border border-[#f7cbd0]/40 px-3 text-sm font-bold">
-                            {formatCZ(startDate)}
-                        </div>
-                        <button
-                            onClick={() => dateInputRef.current?.showPicker?.() || dateInputRef.current?.click()}
-                            className="rounded-md border border-[#f7cbd0]/60 px-3 py-1 text-xs hover:bg-[#f7cbd0]/10"
-                        >
-                            Změnit datum
-                        </button>
                         <input
                             ref={dateInputRef}
+                            id="startDate"
                             type="date"
                             value={startDate}
                             onChange={(e) => setStartDate(e.target.value)}
-                            className="sr-only"
+                            className="h-10 w-40 rounded-md border border-[#f7cbd0]/60 bg-transparent px-3 text-sm font-bold text-[#f7cbd0] outline-none focus:ring-2 focus:ring-[#f7cbd0] [color-scheme:dark]"
                         />
+                        <div className="text-xs opacity-80">Start date: {formatDate(startDate)}</div>
                     </div>
                 </header>
 
@@ -156,25 +140,25 @@ export default function App() {
                             onClick={() => setShowHidden(!showHidden)}
                             className="rounded border border-[#f7cbd0]/60 px-2 py-1 hover:bg-[#f7cbd0]/10"
                         >
-                            {showHidden ? "Skrýt skryté dny" : `Zobrazit skryté dny (${hiddenDays.length})`}
+                            {showHidden ? "Hide hidden days" : `Show hidden days (${hiddenDays.length})`}
                         </button>
                         {hiddenDays.length > 0 && (
                             <button
                                 onClick={() => setHiddenDays([])}
                                 className="rounded border border-[#f7cbd0]/60 px-2 py-1 hover:bg-[#f7cbd0]/10"
                             >
-                                Odkrýt vše
+                                Unhide all
                             </button>
                         )}
                     </div>
                 </div>
 
-                {/* MOBILE TABLE: left day + 5 columns with labels in header */}
+                {/* MOBILE TABLE: left day + 5 columns, text labels in header */}
                 <section className="rounded-xl bg-[#f7cbd0]/5 p-3 ring-1 ring-[#f7cbd0]/20">
                     {/* Header row WITH TEXT LABELS (sticky) */}
                     <div className="sticky top-0 z-10 -m-3 mb-3 bg-[#1c6b6e]/80 backdrop-blur supports-[backdrop-filter]:bg-[#1c6b6e]/60 p-3">
                         <div className="grid grid-cols-[auto_repeat(5,1fr)] items-center gap-2">
-                            <div className="w-22 pl-1 text-left text-[10px] uppercase tracking-widest opacity-80">Day</div>
+                            <div className="w-20 pl-1 text-left text-[10px] uppercase tracking-widest opacity-80">DAY</div>
                             {HABITS.map((h) => (
                                 <div
                                     key={`head-${h}`}
@@ -192,7 +176,7 @@ export default function App() {
                             <div key={day} className={hiddenSet.has(day) ? "opacity-60" : ""}>
                                 <div className="grid grid-cols-[auto_repeat(5,1fr)] items-center gap-2">
                                     {/* Left day cell with checkbox to hide */}
-                                    <div className="flex items-center gap-2 pl-1 w-22">
+                                    <div className="flex items-center gap-2 pl-1 w-20">
                                         <button
                                             onClick={() => toggleHideDay(day)}
                                             className={
@@ -202,14 +186,14 @@ export default function App() {
                                                     : "border-[#f7cbd0]/60 hover:bg-[#f7cbd0]/10")
                                             }
                                             aria-pressed={hiddenSet.has(day)}
-                                            title={hiddenSet.has(day) ? "Odkrýt den" : "Odškrtnout den (skrýt)"}
+                                            title={hiddenSet.has(day) ? "Unhide day" : "Check off day (hide)"}
                                         >
                                             {hiddenSet.has(day) ? <Check className="w-4 h-4 text-[#1c6b6e]" /> : null}
                                         </button>
                                         <span className="min-w-8 text-sm font-bold">{day}</span>
                                     </div>
 
-                                    {/* Habit cells with icons */}
+                                    {/* Habit cells with minimal black icons */}
                                     {HABITS.map((h) => (
                                         <Cell
                                             key={`${h}-${day}`}
@@ -234,7 +218,7 @@ export default function App() {
                         onClick={resetAll}
                         className="rounded-xl bg-[#f7cbd0] px-4 py-2 text-sm font-semibold text-[#1c6b6e] hover:opacity-90"
                     >
-                        Resetovat vše
+                        Reset all
                     </button>
                 </div>
             </main>
@@ -256,22 +240,24 @@ function Cell({
     onClick: () => void;
     emphasize?: boolean;
 }) {
+    const Icon = ICON[habit];
     return (
         <button
             onClick={onClick}
             className={
-                "relative aspect-square w-full rounded-md border transition " +
-                (active ? "bg-[#f7cbd0] text-[#1c6b6e] border-[#f7cbd0] shadow" : "border-[#f7cbd0]/60 hover:border-[#f7cbd0]") +
+                // flex + items-center + justify-center + leading-none = perfektně vycentrovaná ikona
+                "relative aspect-square w-full rounded-md border transition flex items-center justify-center leading-none " +
+                (active
+                    ? "bg-[#f7cbd0] border-[#f7cbd0] shadow"
+                    : "border-[#f7cbd0]/60 hover:border-[#f7cbd0]") +
                 (emphasize ? " ring-1 ring-[#f7cbd0]/50" : "")
             }
             aria-pressed={active}
             aria-label={`${habitLabel[habit]} — den ${day}`}
             title={`${habitLabel[habit]} — den ${day}`}
         >
-            {/* Ikona je vždy černá, aby zůstala minimalistická i na aktivní buňce */}
-            <span className="grid place-items-center">
-        <HabitIcon type={habit} className="w-5 h-5 text-black" />
-      </span>
+            {/* block odstraní baseline mezeru, takže je to fakt přesně uprostřed */}
+            <Icon className="block w-5 h-5 sm:w-6 sm:h-6 text-black" strokeWidth={2} />
         </button>
     );
 }
