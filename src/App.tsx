@@ -1,22 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Apple, Droplet, BookOpen, Dumbbell, Camera, Check } from "lucide-react";
+import { Apple, Droplet, BookOpen, Dumbbell, Camera, Calendar } from "lucide-react";
 
 // ---------- Types ----------
 type Habit = "diet" | "water" | "book" | "workout" | "pic";
 type DayState = Record<Habit, boolean>;
 type TrackerState = Record<number, DayState>; // 1..75
 
-// ---------- Config / Helpers ----------
-const HABITS: Habit[] = ["workout", "water", "diet", "book", "pic"]; // column order
-
-const habitLabel: Record<Habit, string> = {
-    workout: "WORKOUT",
-    water: "WATER",
-    diet: "DIET",
-    book: "BOOK",
-    pic: "PIC",
-};
-
+// ---------- Config ----------
+const TOTAL_DAYS = 75;
+const PAGE_SIZE = 5; // show 5 days at a time
+const HABITS: Habit[] = ["workout", "water", "diet", "book", "pic"];
 const ICON: Record<Habit, React.ElementType> = {
     workout: Dumbbell,
     water: Droplet,
@@ -24,20 +17,28 @@ const ICON: Record<Habit, React.ElementType> = {
     book: BookOpen,
     pic: Camera,
 };
+const habitLabel: Record<Habit, string> = {
+    workout: "WORKOUT",
+    water: "WATER",
+    diet: "DIET",
+    book: "BOOK",
+    pic: "PIC",
+};
+const STORAGE_KEY = "soft75-tracker-v3";
+const DATE_KEY = "soft75-start-date";
 
-const STORAGE_KEY = "75soft-tracker-v1";
-const DATE_KEY = "75soft-startDate";
-const HIDE_KEY = "75soft-hidden-days-v1";
-const SHOW_HIDDEN_KEY = "75soft-showHidden";
+// PIC active only on: 10,20,30,40,50,60,70,75
+const PIC_ACTIVE = new Set([10, 20, 30, 40, 50, 60, 70, 75]);
+const isPicAllowed = (day: number) => PIC_ACTIVE.has(day);
 
+// ---------- Helpers ----------
 function makeEmptyState(): TrackerState {
-    const state: TrackerState = {} as TrackerState;
-    for (let d = 1; d <= 75; d++) {
-        state[d] = { diet: false, water: false, book: false, workout: false, pic: false };
+    const s: TrackerState = {} as TrackerState;
+    for (let d = 1; d <= TOTAL_DAYS; d++) {
+        s[d] = { diet: false, water: false, book: false, workout: false, pic: false };
     }
-    return state;
+    return s;
 }
-
 function useLocalStorageState<T>(key: string, initial: T) {
     const [val, setVal] = useState<T>(() => {
         try {
@@ -47,176 +48,170 @@ function useLocalStorageState<T>(key: string, initial: T) {
             return initial;
         }
     });
-
     useEffect(() => {
         try {
             localStorage.setItem(key, JSON.stringify(val));
         } catch {}
     }, [key, val]);
-
     return [val, setVal] as const;
 }
-
-function formatDate(dateStr: string) {
-    if (!dateStr) return "—";
-    const [y, m, d] = dateStr.split("-").map(Number);
-    const dd = String(d).padStart(2, "0");
-    const mm = String(m).padStart(2, "0");
-    return `${dd}.${mm}.${y}`;
+function formatDMY(iso: string) {
+    if (!iso) return "—";
+    const [y, m, d] = iso.split("-").map(Number);
+    return `${String(d).padStart(2, "0")}.${String(m).padStart(2, "0")}.${y}`;
 }
 
 // ---------- UI ----------
 export default function App() {
     const [state, setState] = useLocalStorageState<TrackerState>(STORAGE_KEY, makeEmptyState());
     const [startDate, setStartDate] = useLocalStorageState<string>(DATE_KEY, "");
-    const [hiddenDays, setHiddenDays] = useLocalStorageState<number[]>(HIDE_KEY, []);
-    const [showHidden, setShowHidden] = useLocalStorageState<boolean>(SHOW_HIDDEN_KEY, false);
-    const hiddenSet = useMemo(() => new Set(hiddenDays), [hiddenDays]);
-    const dateInputRef = useRef<HTMLInputElement | null>(null);
+    const [page, setPage] = useState(0); // 0..14 (15 pages of 5)
+    const dateRef = useRef<HTMLInputElement | null>(null);
+
+    const pagesCount = Math.ceil(TOTAL_DAYS / PAGE_SIZE);
+    const allDays = useMemo(() => Array.from({ length: TOTAL_DAYS }, (_, i) => i + 1), []);
+    const daysToShow = useMemo(
+        () => allDays.slice(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE),
+        [allDays, page]
+    );
 
     const toggle = (day: number, habit: Habit) => {
-        setState((prev) => ({
-            ...prev,
-            [day]: { ...prev[day], [habit]: !prev[day][habit] },
-        }));
-    };
-
-    const toggleHideDay = (day: number) => {
-        setHiddenDays((prev) => (hiddenSet.has(day) ? prev.filter((d) => d !== day) : [...prev, day]));
+        if (habit === "pic" && !isPicAllowed(day)) return; // block PIC outside allowed days
+        setState((prev) => ({ ...prev, [day]: { ...prev[day], [habit]: !prev[day][habit] } }));
     };
 
     const resetAll = () => {
         if (confirm("Reset all progress?")) {
             setState(makeEmptyState());
-            setHiddenDays([]);
+            setPage(0);
         }
     };
 
-    const percentDone = (() => {
-        const total = 75 * HABITS.length;
-        const done = Object.values(state).reduce(
-            (acc, day) => acc + HABITS.reduce((a, h) => a + (day[h] ? 1 : 0), 0),
-            0
-        );
+    // progress: PIC counts only on allowed days
+    const percentDone = useMemo(() => {
+        const baseTotal = TOTAL_DAYS * 4; // diet+water+book+workout
+        const total = baseTotal + PIC_ACTIVE.size;
+        let done = 0;
+        for (let d = 1; d <= TOTAL_DAYS; d++) {
+            const day = state[d];
+            if (!day) continue;
+            if (day.workout) done++;
+            if (day.water) done++;
+            if (day.diet) done++;
+            if (day.book) done++;
+            if (PIC_ACTIVE.has(d) && day.pic) done++;
+        }
         return Math.round((done / total) * 100);
-    })();
-
-    const allDays = Array.from({ length: 75 }, (_, i) => i + 1);
-    const visibleDays = showHidden ? allDays : allDays.filter((d) => !hiddenSet.has(d));
+    }, [state]);
 
     return (
         <div className="min-h-screen w-full bg-[#1c6b6e] text-[#f7cbd0] antialiased">
-            <main className="mx-auto max-w-md px-3 pb-20">
-                {/* Header */}
-                <header className="py-6 text-center">
-                    <h1 className="text-4xl font-extrabold tracking-tight lowercase">75 soft</h1>
+            <main className="mx-auto max-w-sm px-4 pb-24">
+                {/* Title */}
+                <header className="pt-6 pb-4 text-center">
+                    <h1 className="text-5xl font-extrabold tracking-tight lowercase">75 soft</h1>
                     <p className="mt-1 text-sm tracking-[0.25em] uppercase">Challenge Tracker</p>
 
-                    {/* Date picker — visible input for full mobile support */}
+                    {/* Date field (info only) */}
                     <div className="mt-4 flex flex-col items-center gap-2">
-                        <input
-                            ref={dateInputRef}
-                            id="startDate"
-                            type="date"
-                            value={startDate}
-                            onChange={(e) => setStartDate(e.target.value)}
-                            className="h-10 w-40 rounded-md border border-[#f7cbd0]/60 bg-transparent px-3 text-sm font-bold text-[#f7cbd0] outline-none focus:ring-2 focus:ring-[#f7cbd0] [color-scheme:dark]"
-                        />
-                        <div className="text-xs opacity-80">Start date: {formatDate(startDate)}</div>
+                        <div className="flex items-center gap-2 rounded-2xl border-2 border-[#f7cbd0]/70 px-4 py-2">
+                            <input
+                                ref={dateRef}
+                                type="date"
+                                value={startDate}
+                                onChange={(e) => setStartDate(e.target.value)}
+                                className="w-40 bg-transparent text-center text-base font-semibold text-[#f7cbd0] outline-none [color-scheme:dark]"
+                            />
+                            <button
+                                onClick={() => dateRef.current?.showPicker?.() || dateRef.current?.focus()}
+                                className="rounded-lg p-1 hover:bg-[#f7cbd0]/10"
+                                aria-label="Pick start date"
+                            >
+                                <Calendar className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="text-xs opacity-80">Start date: {formatDMY(startDate)}</div>
                     </div>
                 </header>
 
-                {/* Progress + controls */}
-                <div className="mb-4">
-                    <div className="mb-1 flex items-center justify-between text-xs">
+                {/* Progress */}
+                <section className="mb-4">
+                    <div className="mb-2 flex items-center justify-between text-sm">
                         <span>Progress</span>
                         <span>{percentDone}%</span>
                     </div>
-                    <div className="h-2 w-full overflow-hidden rounded-full bg-[#f7cbd0]/20">
+                    <div className="h-3 w-full overflow-hidden rounded-full bg-[#f7cbd0]/20">
                         <div className="h-full bg-[#f7cbd0] transition-all" style={{ width: `${percentDone}%` }} />
-                    </div>
-                    <div className="mt-3 flex items-center justify-between text-xs">
-                        <button
-                            onClick={() => setShowHidden(!showHidden)}
-                            className="rounded border border-[#f7cbd0]/60 px-2 py-1 hover:bg-[#f7cbd0]/10"
-                        >
-                            {showHidden ? "Hide hidden days" : `Show hidden days (${hiddenDays.length})`}
-                        </button>
-                        {hiddenDays.length > 0 && (
-                            <button
-                                onClick={() => setHiddenDays([])}
-                                className="rounded border border-[#f7cbd0]/60 px-2 py-1 hover:bg-[#f7cbd0]/10"
-                            >
-                                Unhide all
-                            </button>
-                        )}
-                    </div>
-                </div>
-
-                {/* MOBILE TABLE: left day + 5 columns, text labels in header */}
-                <section className="rounded-xl bg-[#f7cbd0]/5 p-3 ring-1 ring-[#f7cbd0]/20">
-                    {/* Header row WITH TEXT LABELS (sticky) */}
-                    <div className="sticky top-0 z-10 -m-3 mb-3 bg-[#1c6b6e]/80 backdrop-blur supports-[backdrop-filter]:bg-[#1c6b6e]/60 p-3">
-                        <div className="grid grid-cols-[auto_repeat(5,1fr)] items-center gap-2">
-                            <div className="w-20 pl-1 text-left text-[10px] uppercase tracking-widest opacity-80">DAY</div>
-                            {HABITS.map((h) => (
-                                <div
-                                    key={`head-${h}`}
-                                    className="flex h-6 items-center justify-center text-[10px] uppercase tracking-widest opacity-90"
-                                >
-                                    {habitLabel[h]}
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Body rows */}
-                    <div className="space-y-2">
-                        {visibleDays.map((day) => (
-                            <div key={day} className={hiddenSet.has(day) ? "opacity-60" : ""}>
-                                <div className="grid grid-cols-[auto_repeat(5,1fr)] items-center gap-2">
-                                    {/* Left day cell with checkbox to hide */}
-                                    <div className="flex items-center gap-2 pl-1 w-20">
-                                        <button
-                                            onClick={() => toggleHideDay(day)}
-                                            className={
-                                                "flex h-6 w-6 items-center justify-center rounded-md border " +
-                                                (hiddenSet.has(day)
-                                                    ? "bg-[#f7cbd0] text-[#1c6b6e] border-[#f7cbd0]"
-                                                    : "border-[#f7cbd0]/60 hover:bg-[#f7cbd0]/10")
-                                            }
-                                            aria-pressed={hiddenSet.has(day)}
-                                            title={hiddenSet.has(day) ? "Unhide day" : "Check off day (hide)"}
-                                        >
-                                            {hiddenSet.has(day) ? <Check className="w-4 h-4 text-[#1c6b6e]" /> : null}
-                                        </button>
-                                        <span className="min-w-8 text-sm font-bold">{day}</span>
-                                    </div>
-
-                                    {/* Habit cells with minimal black icons */}
-                                    {HABITS.map((h) => (
-                                        <Cell
-                                            key={`${h}-${day}`}
-                                            day={day}
-                                            habit={h}
-                                            active={state[day][h]}
-                                            onClick={() => toggle(day, h)}
-                                            emphasize={h === "pic" && day % 5 === 0}
-                                        />
-                                    ))}
-                                </div>
-                                {/* Separator every 5 days */}
-                                {day % 5 === 0 && <div className="mt-2 h-px w-full bg-[#f7cbd0]/20" />}
-                            </div>
-                        ))}
                     </div>
                 </section>
 
-                {/* Footer actions */}
-                <div className="mt-6 flex justify-center gap-3">
+                {/* TABLE — no background wrapper */}
+                {/* Header labels (no bg) */}
+                <div className="mb-2">
+                    <div className="grid grid-cols-[auto_repeat(5,1fr)] items-center gap-1">
+                        <div className="w-10 text-center text-[10px] uppercase tracking-[0.18em] opacity-80">
+                            Day
+                        </div>
+                        {HABITS.map((h) => (
+                            <div
+                                key={`head-${h}`}
+                                className="flex h-6 items-center justify-center text-[10px] uppercase tracking-[0.18em] opacity-90"
+                            >
+                                {habitLabel[h]}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
+                {/* Rows (square cells, centered day number, tight gaps) */}
+                <div className="space-y-2">
+                    {daysToShow.map((day) => (
+                        <div key={day}>
+                            <div className="grid grid-cols-[auto_repeat(5,1fr)] items-center gap-1">
+                                {/* Day number */}
+                                <div className="flex w-10 items-center justify-center">
+                                    <span className="text-base font-semibold leading-none">{day}</span>
+                                </div>
+
+                                {/* Habit cells */}
+                                {HABITS.map((h) => (
+                                    <Cell
+                                        key={`${h}-${day}`}
+                                        day={day}
+                                        habit={h}
+                                        active={state[day][h]}
+                                        onClick={() => toggle(day, h)}
+                                        disabled={h === "pic" && !isPicAllowed(day)}
+                                    />
+                                ))}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                {/* Pager */}
+                <div className="mt-6 flex items-center justify-between gap-3">
+                    <button
+                        onClick={() => setPage((p) => Math.max(0, p - 1))}
+                        className="flex-1 rounded-full bg-[#f7cbd0] px-5 py-3 text-base font-semibold text-[#1c6b6e] shadow-sm hover:opacity-95 disabled:opacity-50"
+                        disabled={page === 0}
+                    >
+                        Previous week
+                    </button>
+                    <button
+                        onClick={() => setPage((p) => Math.min(pagesCount - 1, p + 1))}
+                        className="flex-1 rounded-full bg-[#f7cbd0] px-5 py-3 text-base font-semibold text-[#1c6b6e] shadow-sm hover:opacity-95 disabled:opacity-50"
+                        disabled={page === pagesCount - 1}
+                    >
+                        Next week
+                    </button>
+                </div>
+
+                {/* Reset */}
+                <div className="mt-6 flex justify-center">
                     <button
                         onClick={resetAll}
-                        className="rounded-xl bg-[#f7cbd0] px-4 py-2 text-sm font-semibold text-[#1c6b6e] hover:opacity-90"
+                        className="rounded-2xl bg-[#f7cbd0] px-6 py-3 text-base font-semibold text-[#1c6b6e] hover:opacity-90"
                     >
                         Reset all
                     </button>
@@ -232,32 +227,34 @@ function Cell({
                   habit,
                   active,
                   onClick,
-                  emphasize,
+                  disabled,
               }: {
     day: number;
     habit: Habit;
     active: boolean;
     onClick: () => void;
-    emphasize?: boolean;
+    disabled?: boolean;
 }) {
     const Icon = ICON[habit];
+    const iconColor = disabled ? "text-[#f7cbd0]/40" : active ? "text-black" : "text-[#f7cbd0]";
     return (
         <button
             onClick={onClick}
+            disabled={disabled}
             className={
-                // flex + items-center + justify-center + leading-none = perfektně vycentrovaná ikona
-                "relative aspect-square w-full rounded-md border transition flex items-center justify-center leading-none " +
-                (active
-                    ? "bg-[#f7cbd0] border-[#f7cbd0] shadow"
-                    : "border-[#f7cbd0]/60 hover:border-[#f7cbd0]") +
-                (emphasize ? " ring-1 ring-[#f7cbd0]/50" : "")
+                // perfect square, no rounded corners; bigger tap target
+                "relative aspect-square min-h-[52px] w-full rounded-xl border-2 transition grid place-items-center " +
+                (disabled
+                    ? "border-[#f7cbd0]/30"
+                    : active
+                        ? "bg-[#f7cbd0] border-[#f7cbd0] shadow"
+                        : "border-[#f7cbd0]/60 hover:border-[#f7cbd0] focus:ring-2 focus:ring-[#f7cbd0]/40")
             }
             aria-pressed={active}
-            aria-label={`${habitLabel[habit]} — den ${day}`}
-            title={`${habitLabel[habit]} — den ${day}`}
+            aria-label={`${habitLabel[habit]} — day ${day}`}
+            title={`${habitLabel[habit]} — day ${day}`}
         >
-            {/* block odstraní baseline mezeru, takže je to fakt přesně uprostřed */}
-            <Icon className="block w-5 h-5 sm:w-6 sm:h-6 text-black" strokeWidth={2} />
+            <Icon className={`block h-6 w-6 ${iconColor} transition-colors`} strokeWidth={2} />
         </button>
     );
 }
