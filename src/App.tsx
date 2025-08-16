@@ -1,25 +1,26 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Apple, Droplet, BookOpen, Dumbbell, Camera, Check } from "lucide-react";
 
 // ---------- Types ----------
 type Habit = "diet" | "water" | "book" | "workout" | "pic";
-
 type DayState = Record<Habit, boolean>;
-
 type TrackerState = Record<number, DayState>; // 1..75
 
-// ---------- Helpers ----------
-const HABITS: Habit[] = ["diet", "water", "book", "workout", "pic"];
+// ---------- Config / Helpers ----------
+const HABITS: Habit[] = ["diet", "water", "book", "workout", "pic"]; // pořadí sloupců
 
 const habitLabel: Record<Habit, string> = {
-    diet: "DIET",
-    water: "WATER",
-    book: "BOOK",
-    workout: "WORKOUT",
-    pic: "PIC",
+    diet: "Diet",
+    water: "Water",
+    book: "Book",
+    workout: "Workout",
+    pic: "Pic",
 };
 
 const STORAGE_KEY = "75soft-tracker-v1";
 const DATE_KEY = "75soft-startDate";
+const HIDE_KEY = "75soft-hidden-days-v1";
+const SHOW_HIDDEN_KEY = "75soft-showHidden";
 
 function makeEmptyState(): TrackerState {
     const state: TrackerState = {} as TrackerState;
@@ -56,13 +57,30 @@ function formatCZ(dateStr: string) {
     return `${dd}.${mm}.${y}`;
 }
 
+// Ikona pro daný návyk (černá, minimalistická)
+function HabitIcon({ type, className = "w-5 h-5" }: { type: Habit; className?: string }) {
+    const common = `${className} text-black`;
+    switch (type) {
+        case "diet":
+            return <Apple className={common} aria-hidden />;
+        case "water":
+            return <Droplet className={common} aria-hidden />;
+        case "book":
+            return <BookOpen className={common} aria-hidden />;
+        case "workout":
+            return <Dumbbell className={common} aria-hidden />;
+        case "pic":
+            return <Camera className={common} aria-hidden />;
+    }
+}
+
 // ---------- UI ----------
 export default function App() {
-    const [state, setState] = useLocalStorageState<TrackerState>(
-        STORAGE_KEY,
-        makeEmptyState()
-    );
+    const [state, setState] = useLocalStorageState<TrackerState>(STORAGE_KEY, makeEmptyState());
     const [startDate, setStartDate] = useLocalStorageState<string>(DATE_KEY, "");
+    const [hiddenDays, setHiddenDays] = useLocalStorageState<number[]>(HIDE_KEY, []);
+    const [showHidden, setShowHidden] = useLocalStorageState<boolean>(SHOW_HIDDEN_KEY, false);
+    const hiddenSet = useMemo(() => new Set(hiddenDays), [hiddenDays]);
     const dateInputRef = useRef<HTMLInputElement | null>(null);
 
     const toggle = (day: number, habit: Habit) => {
@@ -72,9 +90,14 @@ export default function App() {
         }));
     };
 
+    const toggleHideDay = (day: number) => {
+        setHiddenDays((prev) => (hiddenSet.has(day) ? prev.filter((d) => d !== day) : [...prev, day]));
+    };
+
     const resetAll = () => {
         if (confirm("Resetovat všechna políčka?")) {
             setState(makeEmptyState());
+            setHiddenDays([]);
         }
     };
 
@@ -87,13 +110,16 @@ export default function App() {
         return Math.round((done / total) * 100);
     })();
 
+    const allDays = Array.from({ length: 75 }, (_, i) => i + 1);
+    const visibleDays = showHidden ? allDays : allDays.filter((d) => !hiddenSet.has(d));
+
     return (
         <div className="min-h-screen w-full bg-[#1c6b6e] text-[#f7cbd0] antialiased">
-            <main className="mx-auto max-w-md px-4 pb-20">
+            <main className="mx-auto max-w-md px-3 pb-20">
                 {/* Header */}
                 <header className="py-6 text-center">
                     <h1 className="text-4xl font-extrabold tracking-tight lowercase">75 soft</h1>
-                    <p className="mt-1 text-sm tracking-[0.25em] uppercase">Challange Tracker</p>
+                    <p className="mt-1 text-sm tracking-[0.25em] uppercase">Challenge Tracker</p>
 
                     {/* Date picker */}
                     <div className="mt-4 flex flex-col items-center gap-2">
@@ -116,64 +142,101 @@ export default function App() {
                     </div>
                 </header>
 
-                {/* Progress bar */}
-                <div className="mb-8">
+                {/* Progress + controls */}
+                <div className="mb-4">
                     <div className="mb-1 flex items-center justify-between text-xs">
                         <span>Progress</span>
                         <span>{percentDone}%</span>
                     </div>
                     <div className="h-2 w-full overflow-hidden rounded-full bg-[#f7cbd0]/20">
-                        <div
-                            className="h-full bg-[#f7cbd0] transition-all"
-                            style={{ width: `${percentDone}%` }}
-                        />
+                        <div className="h-full bg-[#f7cbd0] transition-all" style={{ width: `${percentDone}%` }} />
+                    </div>
+                    <div className="mt-3 flex items-center justify-between text-xs">
+                        <button
+                            onClick={() => setShowHidden(!showHidden)}
+                            className="rounded border border-[#f7cbd0]/60 px-2 py-1 hover:bg-[#f7cbd0]/10"
+                        >
+                            {showHidden ? "Skrýt skryté dny" : `Zobrazit skryté dny (${hiddenDays.length})`}
+                        </button>
+                        {hiddenDays.length > 0 && (
+                            <button
+                                onClick={() => setHiddenDays([])}
+                                className="rounded border border-[#f7cbd0]/60 px-2 py-1 hover:bg-[#f7cbd0]/10"
+                            >
+                                Odkrýt vše
+                            </button>
+                        )}
                     </div>
                 </div>
 
-                {/* Days list - one column with 75 rows */}
-                <div className="space-y-4">
-                    {Array.from({ length: 75 }, (_, i) => i + 1).map((day) => (
-                        <div
-                            key={day}
-                            className="rounded-lg bg-[#f7cbd0]/5 p-3 ring-1 ring-[#f7cbd0]/20"
-                        >
-                            <div className="mb-2 flex items-center justify-between">
-                                <span className="text-sm font-bold">Day {day}</span>
-                            </div>
-                            <div className="grid grid-cols-5 gap-2">
-                                {HABITS.map((h) => (
-                                    <Cell
-                                        key={`${h}-${day}`}
-                                        day={day}
-                                        habit={h}
-                                        active={state[day][h]}
-                                        onClick={() => toggle(day, h)}
-                                    />
-                                ))}
-                            </div>
+                {/* MOBILE TABLE: left day + 5 columns with labels in header */}
+                <section className="rounded-xl bg-[#f7cbd0]/5 p-3 ring-1 ring-[#f7cbd0]/20">
+                    {/* Header row WITH TEXT LABELS (sticky) */}
+                    <div className="sticky top-0 z-10 -m-3 mb-3 bg-[#1c6b6e]/80 backdrop-blur supports-[backdrop-filter]:bg-[#1c6b6e]/60 p-3">
+                        <div className="grid grid-cols-[auto_repeat(5,1fr)] items-center gap-2">
+                            <div className="w-22 pl-1 text-left text-[10px] uppercase tracking-widest opacity-80">Day</div>
+                            {HABITS.map((h) => (
+                                <div
+                                    key={`head-${h}`}
+                                    className="flex h-6 items-center justify-center text-[10px] uppercase tracking-widest opacity-90"
+                                >
+                                    {habitLabel[h]}
+                                </div>
+                            ))}
                         </div>
-                    ))}
-                </div>
+                    </div>
 
-                {/* Rules */}
-                <section className="mt-12 rounded-2xl bg-[#f7cbd0]/5 p-4 ring-1 ring-[#f7cbd0]/20">
-                    <h2 className="text-2xl font-extrabold mb-3">rules</h2>
-                    <ul className="space-y-2 text-sm">
-                        <li className="list-disc ml-6">Eat well and only drink alcohol on special occasions</li>
-                        <li className="list-disc ml-6">Drink 3 liters of water</li>
-                        <li className="list-disc ml-6">45 min workout per day + 1 recovery day a week</li>
-                        <li className="list-disc ml-6">Read 10 pages of any book</li>
-                        <li className="list-disc ml-6">Progress pic once a week</li>
-                    </ul>
-                    <div className="mt-4 flex flex-wrap gap-3">
-                        <button
-                            onClick={resetAll}
-                            className="rounded-xl bg-[#f7cbd0] px-4 py-2 font-semibold text-[#1c6b6e] hover:opacity-90"
-                        >
-                            Resetovat vše
-                        </button>
+                    {/* Body rows */}
+                    <div className="space-y-2">
+                        {visibleDays.map((day) => (
+                            <div key={day} className={hiddenSet.has(day) ? "opacity-60" : ""}>
+                                <div className="grid grid-cols-[auto_repeat(5,1fr)] items-center gap-2">
+                                    {/* Left day cell with checkbox to hide */}
+                                    <div className="flex items-center gap-2 pl-1 w-22">
+                                        <button
+                                            onClick={() => toggleHideDay(day)}
+                                            className={
+                                                "flex h-6 w-6 items-center justify-center rounded-md border " +
+                                                (hiddenSet.has(day)
+                                                    ? "bg-[#f7cbd0] text-[#1c6b6e] border-[#f7cbd0]"
+                                                    : "border-[#f7cbd0]/60 hover:bg-[#f7cbd0]/10")
+                                            }
+                                            aria-pressed={hiddenSet.has(day)}
+                                            title={hiddenSet.has(day) ? "Odkrýt den" : "Odškrtnout den (skrýt)"}
+                                        >
+                                            {hiddenSet.has(day) ? <Check className="w-4 h-4 text-[#1c6b6e]" /> : null}
+                                        </button>
+                                        <span className="min-w-8 text-sm font-bold">{day}</span>
+                                    </div>
+
+                                    {/* Habit cells with icons */}
+                                    {HABITS.map((h) => (
+                                        <Cell
+                                            key={`${h}-${day}`}
+                                            day={day}
+                                            habit={h}
+                                            active={state[day][h]}
+                                            onClick={() => toggle(day, h)}
+                                            emphasize={h === "pic" && day % 5 === 0}
+                                        />
+                                    ))}
+                                </div>
+                                {/* Separator every 5 days */}
+                                {day % 5 === 0 && <div className="mt-2 h-px w-full bg-[#f7cbd0]/20" />}
+                            </div>
+                        ))}
                     </div>
                 </section>
+
+                {/* Footer actions */}
+                <div className="mt-6 flex justify-center gap-3">
+                    <button
+                        onClick={resetAll}
+                        className="rounded-xl bg-[#f7cbd0] px-4 py-2 text-sm font-semibold text-[#1c6b6e] hover:opacity-90"
+                    >
+                        Resetovat vše
+                    </button>
+                </div>
             </main>
         </div>
     );
@@ -185,24 +248,30 @@ function Cell({
                   habit,
                   active,
                   onClick,
+                  emphasize,
               }: {
     day: number;
     habit: Habit;
     active: boolean;
     onClick: () => void;
+    emphasize?: boolean;
 }) {
     return (
         <button
             onClick={onClick}
             className={
-                "relative aspect-square w-full rounded-md border text-[10px] font-bold transition " +
-                (active
-                    ? "bg-[#f7cbd0] text-[#1c6b6e] border-[#f7cbd0] shadow"
-                    : "border-[#f7cbd0]/60 hover:border-[#f7cbd0]")
+                "relative aspect-square w-full rounded-md border transition " +
+                (active ? "bg-[#f7cbd0] text-[#1c6b6e] border-[#f7cbd0] shadow" : "border-[#f7cbd0]/60 hover:border-[#f7cbd0]") +
+                (emphasize ? " ring-1 ring-[#f7cbd0]/50" : "")
             }
             aria-pressed={active}
+            aria-label={`${habitLabel[habit]} — den ${day}`}
+            title={`${habitLabel[habit]} — den ${day}`}
         >
-            {habitLabel[habit].slice(0, 2)}
+            {/* Ikona je vždy černá, aby zůstala minimalistická i na aktivní buňce */}
+            <span className="grid place-items-center">
+        <HabitIcon type={habit} className="w-5 h-5 text-black" />
+      </span>
         </button>
     );
 }
